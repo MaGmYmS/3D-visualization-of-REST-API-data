@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import { getAllNodes, getNodeById } from './api';
+import { getAllNodes, getAllNodesWithRelationships, getNodeById } from './api';
 import { createNode, createRelationship } from './components/Node';
 
 console.log('main.js loaded');
 
 // Количество отображаемых узлов
-const NODE_LIMIT = 10;
+const NODE_LIMIT = 1000;
 
 // Инициализация сцены
 const scene = new THREE.Scene();
@@ -33,142 +33,126 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Функция для создания случайных координат для узлов
-const generateRandomPosition = () => {
-    return {
-        x: Math.random() * 100 - 50, 
-        y: Math.random() * 100 - 50,
-        z: Math.random() * 100 - 50
-    };
-};
-
-
 // Функция для назначения цвета узлу
 const getNodeColor = (label) => {
-    console.log('Node label:', label);
-    if (label === 'User') {
-        return 0x0000ff; // Синий для "User"
-    } else if (label === 'Group') {
-        return 0x00ff00; // Зеленый для "Group"
+    console.log('Node label:', label[0]);
+    if (label[0] === 'User') {
+        return 0x4682B4; // Темно-голубой для "User" (Steel Blue)
+    } else if (label[0] === 'Group') {
+        return 0x388E3C; // Темно-зеленый для "Group" (Forest Green)
     }
-    return 0xffffff; // Если не "User" и не "Group", то белый по умолчанию
+    return 0xD2B48C; // Темно-бежевый по умолчанию (Tan)
 };
 
 // Функция для назначения цвета связи
 const getRelationshipColor = (relationshipType) => {
     console.log('Relationship type:', relationshipType);
     if (relationshipType === 'Follow') {
-        return 0x0000ff; // Синий для "Follower"
+        return 0x4682B4; // Темно-голубой для "Follow" (Steel Blue)
     } else if (relationshipType === 'Subscribe') {
-        return 0x00ff00; // Зеленый для "Subscription"
+        return 0x388E3C; // Темно-зеленый для "Subscribe" (Forest Green)
     }
-    return 0xff0000; // Ярко-красный для всех остальных типов
+    return 0xFF69B4; // Темно-розовый для остальных (Hot Pink)
 };
 
-// Метод для получения дополнительной информации по каждому узлу
-const getNodeDetails = async (nodeId) => {
-    console.log('getNodeDetails with nodeId:', nodeId);
-    try {
-        const nodeDetails = await getNodeById(nodeId);
-        console.log(`nodeDetails with ${nodeId}:`, nodeDetails);
+// Функция генерации координат узлов на поверхности сферы
+const generateSphericalPositions = (numNodes, radius = 50) => {
+    const positions = [];
+    const goldenRatio = (1 + Math.sqrt(5)) / 2; // Золотое сечение для равномерного распределения
 
-        if (nodeDetails) {
-            return nodeDetails;
-        } else {
-            console.error(`Node with id ${nodeId} has no details or node data.`);
-            return null;
-        }
+    for (let i = 0; i < numNodes; i++) {
+        // Индекс узла i
+        const y = 1 - (i / (numNodes - 1)) * 2; // Позиция по оси Y от -1 до 1
+        const radiusAtY = Math.sqrt(1 - y * y); // Радиус для данной высоты (y)
 
-    } catch (error) {
-        console.error(`Error fetching details for node ${nodeId}:`, error);
-        return null;
+        // Угол по оси X
+        const theta = goldenRatio * i;
+
+        // Преобразование в декартовы координаты
+        const x = radiusAtY * Math.cos(theta) * radius;
+        const z = radiusAtY * Math.sin(theta) * radius;
+
+        positions.push({ x, y: y * radius, z });
     }
+
+    return positions;
 };
 
-// getAllNodes().then((nodes) => {
-//     console.log('Loaded nodes:', nodes); // Отладка
-//     const limitedNodes = nodes.slice(0, NODE_LIMIT); // Ограничиваем количество узлов
-//     console.log('Limited nodes:', limitedNodes); // Проверяем ограниченные данные
+// Функция подготовки ограниченных узлов и позиций
+const prepareLimitedNodes = (nodesWithRelationships) => {
+    const limitedNodes = nodesWithRelationships.slice(0, NODE_LIMIT); // Ограничиваем узлы
+    const nodeIdsSet = new Set(limitedNodes.map((n) => n.node.attributes.id)); // Множество ID ограниченных узлов
+    const positionsMap = new Map();
 
-//     const objects = [];
-//     limitedNodes.forEach(async (node) => {
-//         // Для каждого узла генерируем случайные координаты
-//         const position = generateRandomPosition();
+    // Получаем позиции для узлов
+    const positions = generateSphericalPositions(limitedNodes.length, 50); // 50 — радиус сферы
 
-//         // Присваиваем цвет в зависимости от label узла
-//         const color = getNodeColor(node.label);
+    const preparedNodes = limitedNodes.map((nodeObject, index) => {
+        const node = nodeObject.node;
 
-//         // Создаем узел
-//         const nodeMesh = createNode(position, color, node.attributes);
-//         console.log('Node created:', nodeMesh);
+        // Используем заранее вычисленную позицию для этого узла
+        const position = positions[index];
+        positionsMap.set(node.attributes.id, position);
 
-//         // Добавляем узел в сцену
-//         scene.add(nodeMesh);
-//         objects.push(nodeMesh);
-//     });
+        // Оставляем только связи, указывающие на узлы в пределах ограничения
+        const relationships = nodeObject.relationships.filter((rel) =>
+            nodeIdsSet.has(rel.target_node.attributes.id)
+        );
 
-//     // Устанавливаем центр масс как цель камеры
-//     const center = calculateCenterOfMass(objects);
-//     controls.target.set(center.x, center.y, center.z);
-// });
+        return { node, relationships, position };
+    });
 
-// Получаем список всех узлов
-getAllNodes().then(async (nodes) => {
-    console.log('Loaded nodes:', nodes); // Отладка
+    return { preparedNodes, positionsMap };
+};
 
-    // Ограничиваем количество узлов для обработки
-    const limitedNodes = nodes.slice(0, NODE_LIMIT);
-    console.log('Limited nodes:', limitedNodes);
-
+// Функция для рисования узлов
+const drawNodes = (preparedNodes) => {
     const objects = []; // Для хранения узлов на сцене
-    const positionsMap = new Map(); // Для хранения позиций узлов по их id
 
-    // Обработка каждого узла из ограниченного списка
-    for (const node of limitedNodes) {
-        const nodeDetails = await getNodeDetails(node.id);
-        if (!nodeDetails) {
-            console.log(`Skipping node with id ${node.id} due to missing details.`);
-            continue;
-        }
+    preparedNodes.forEach(({ node, relationships, position }) => {
+        const color = getNodeColor(node.label); // Присваиваем цвет узлу
+        const nodeMesh = createNode(position, color, node, relationships); // Создаем узел
+        scene.add(nodeMesh); // Добавляем узел на сцену
+        objects.push(nodeMesh); // Сохраняем узел для дальнейшей обработки
+    });
 
-        // Генерируем случайные координаты для текущего узла
-        const position = generateRandomPosition();
-        positionsMap.set(node.id, position); // Сохраняем позицию узла для связи
+    return objects; // Возвращаем массив узлов для вычисления центра масс
+};
 
-        // Присваиваем цвет в зависимости от label узла
-        const color = getNodeColor(node.label);
+// Функция для рисования связей
+const drawRelationships = (preparedNodes, positionsMap) => {
+    preparedNodes.forEach(({ node, relationships }) => {
+        const nodePosition = positionsMap.get(node.attributes.id);
 
-        // Создаем и добавляем узел в сцену
-        const nodeMesh = createNode(position, color, nodeDetails[0].node.attributes);
-        scene.add(nodeMesh);
-        objects.push(nodeMesh);
-
-        // Обрабатываем связи для текущего узла
-        nodeDetails.forEach((detail) => {
-            const targetNodeId = detail.target_node.attributes.id; // ID целевого узла
-
-            // Проверяем, есть ли целевой узел в ограниченном списке
-            const targetNode = limitedNodes.find((n) => n.id === targetNodeId);
-            if (!targetNode) {
-                console.log(`Target node with id ${targetNodeId} is not in the limited list. Skipping connection.`);
-                return;
-            }
-
-            // Проверяем, есть ли координаты целевого узла
+        relationships.forEach((relationship) => {
+            const targetNodeId = relationship.target_node.attributes.id;
             const targetPosition = positionsMap.get(targetNodeId);
+
             if (!targetPosition) {
                 console.log(`No position for target node ${targetNodeId}. Skipping connection.`);
                 return;
             }
 
-            // Получаем цвет связи
-            const relationshipColor = getRelationshipColor(detail.relationship.type);
-
-            // Создаем линию связи между узлами
-            const line = createRelationship(position, targetPosition, relationshipColor);
-            scene.add(line);
+            const relationshipColor = getRelationshipColor(relationship.relationship.type);
+            const line = createRelationship(nodePosition, targetPosition, relationshipColor);
+            scene.add(line); // Добавляем линию на сцену
         });
-    }
+    });
+};
+
+// Основной процесс загрузки данных и рендера
+getAllNodesWithRelationships().then(async (nodesWithRelationships) => {
+    console.log('Loaded nodes with relationships:', nodesWithRelationships);
+
+    // Подготовка узлов и позиций
+    const { preparedNodes, positionsMap } = prepareLimitedNodes(nodesWithRelationships);
+    console.log('Prepared nodes:', preparedNodes);
+
+    // Рисуем узлы
+    const objects = drawNodes(preparedNodes);
+
+    // Рисуем связи
+    drawRelationships(preparedNodes, positionsMap);
 
     // Устанавливаем центр масс как цель камеры
     const center = calculateCenterOfMass(objects);
@@ -189,6 +173,63 @@ const calculateCenterOfMass = (nodes) => {
     center.z /= nodes.length;
     return center;
 };
+
+renderer.domElement.addEventListener('click', (event) => {
+    const mouse = {
+        x: (event.clientX / window.innerWidth) * 2 - 1,
+        y: -(event.clientY / window.innerHeight) * 2 + 1,
+    };
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+
+    const intersects = raycaster.intersectObjects(scene.children);
+
+    if (intersects.length > 0) {
+        const intersectedObject = intersects[0].object;
+
+        if (intersectedObject.userData && intersectedObject.userData.id) {
+            const {
+                id,
+                label,
+                home_town,
+                screen_name,
+                sex,
+                name,
+                relationships,
+            } = intersectedObject.userData;
+
+            console.log('Clicked Sphere Details:');
+            console.log('ID:', id);
+            console.log('Label:', label);
+            console.log('Name:', name);
+            console.log('Screen Name:', screen_name);
+            console.log('Sex:', sex);
+            console.log('Home Town:', home_town);
+            console.log('Relationships:', relationships);
+
+            const relationshipInfo = relationships.map((rel) => `
+                <li>
+                    <strong>Type:</strong> ${rel.relationship.type}<br>
+                    <strong>Target Node ID:</strong> ${rel.target_node.attributes.id}
+                </li>
+            `).join('');
+
+            const infoDiv = document.getElementById('info');
+            infoDiv.innerHTML = `
+                <strong>ID:</strong> ${id}<br>
+                <strong>Label:</strong> ${label}<br>
+                <strong>Name:</strong> ${name}<br>
+                <strong>Screen Name:</strong> ${screen_name}<br>
+                <strong>Sex:</strong> ${sex}<br>
+                <strong>Home Town:</strong> ${home_town}<br>
+                <strong>Relationships:</strong> <ul>${relationshipInfo}</ul>
+            `;
+        } else {
+            console.log('No user data found for this object.');
+        }
+    }
+});
 
 // Анимация
 const animate = () => {
